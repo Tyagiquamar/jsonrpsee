@@ -239,12 +239,11 @@ impl PendingSubscriptionSink {
 		);
 		let success = response.is_success();
 
-		// TODO: #1052
+		// The response is sent to the transport here and handed over through `subscribe`
+		// such that the RPC middleware (e.g. the RPC logger) sees it as well.
 		//
-		// Ideally the message should be sent only once.
-		//
-		// The same message is sent twice here because one is sent directly to the transport layer and
-		// the other one is sent internally to accept the subscription.
+		// The transports must not send it a second time; subscription responses are
+		// filtered out of the responses that the RPC service returns (#1052).
 		self.inner.send(response.to_json()).await.map_err(|_| PendingSubscriptionAcceptError)?;
 		self.subscribe.send(response).map_err(|_| PendingSubscriptionAcceptError)?;
 

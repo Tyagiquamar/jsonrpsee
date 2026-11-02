@@ -153,11 +153,20 @@ impl RpcServiceT for RpcService {
 		let service = self.clone();
 		async move {
 			let mut got_notification = false;
+			let mut got_subscription = false;
 
 			for batch_entry in batch.into_iter() {
 				match batch_entry {
 					Ok(BatchEntry::Call(req)) => {
 						let rp = service.call(req).await;
+
+						// Subscription responses are sent out by the subscription itself
+						// and must not be sent a second time as part of the batch response (#1052).
+						if rp.is_subscription() {
+							got_subscription = true;
+							continue;
+						}
+
 						if let Err(err) = batch_rp.append(rp) {
 							return err;
 						}
@@ -176,8 +185,9 @@ impl RpcServiceT for RpcService {
 				}
 			}
 
-			// If the batch is empty and we got a notification, we return an empty response.
-			if batch_rp.is_empty() && got_notification {
+			// If the batch is empty and we got a notification or a subscription,
+			// we return an empty response.
+			if batch_rp.is_empty() && (got_notification || got_subscription) {
 				MethodResponse::notification()
 			}
 			// An empty batch is regarded as an invalid request here.

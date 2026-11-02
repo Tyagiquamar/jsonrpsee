@@ -976,6 +976,35 @@ async fn server_with_infinite_call(
 	(server.start(module), addr)
 }
 
+/// The subscription response is dispatched by `PendingSubscriptionSink::accept` itself
+/// and must not be repeated in the batch response (#1052).
+#[tokio::test]
+async fn subscription_response_in_batch_is_sent_once() {
+	use serde_json::json;
+
+	init_logger();
+	let addr = server().await;
+	let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+
+	let batch = r#"[{"jsonrpc":"2.0","method":"say_hello","id":1},{"jsonrpc":"2.0","method":"subscribe_hello","params":[],"id":0}]"#;
+	client.send(batch).with_default_timeout().await.unwrap().unwrap();
+
+	// The subscription response is sent out by the subscription callback.
+	let sub_rp: JsonValue =
+		serde_json::from_str(&client.receive().with_default_timeout().await.unwrap().unwrap()).unwrap();
+	assert_eq!(sub_rp["id"], json!(0));
+	assert!(sub_rp.get("result").is_some(), "expected a subscription response: {sub_rp}");
+
+	// The batch response only contains the response of the ordinary method call.
+	let batch_rp: JsonValue =
+		serde_json::from_str(&client.receive().with_default_timeout().await.unwrap().unwrap()).unwrap();
+	assert_eq!(batch_rp, json!([{"jsonrpc":"2.0","id":1,"result":"hello"}]));
+
+	// Nothing else is sent back to the subscriber.
+	let extra = client.receive().with_timeout(Duration::from_millis(250)).await;
+	assert!(extra.is_err(), "the subscription response was sent more than once: {extra:?}");
+}
+
 #[tokio::test]
 async fn notification_id_classification_websocket_singles_and_mixed_batches() {
 	use serde_json::json;
